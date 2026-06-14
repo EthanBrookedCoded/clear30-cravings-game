@@ -406,6 +406,7 @@ struct BreathingView: View {
         doneConfetti += 1
         // Linger long enough to feel like a payoff before moving on.
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) {
+            showDoneOverlay = false
             onDone()
         }
     }
@@ -448,6 +449,8 @@ struct BreathingView: View {
             .padding(.horizontal, GlobalData.shared.horizontalPadding)
             .transition(.scale.combined(with: .opacity))
         }
+        // Celebratory only — must never capture taps from the picker beneath/after it.
+        .allowsHitTesting(false)
     }
 
     private var breathingStats: some View {
@@ -747,7 +750,7 @@ struct BreathingPickerView: View {
 
             VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing / 2) {
                 Heading2(text: "Nice and slow 🌿")
-                SmallText(text: "Go again, or try a different style.").opacity(0.5)
+                SmallText(text: "Pick a style — circle or rolling hill.").opacity(0.5)
             }
             .padding(.bottom, GlobalData.shared.cardSpacing * 2)
 

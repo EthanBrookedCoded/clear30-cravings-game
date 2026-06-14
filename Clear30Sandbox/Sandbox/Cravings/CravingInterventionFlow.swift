@@ -137,7 +137,8 @@ final class CravingSession {
         }
     }
 
-    func openBreathing() { step = .breathing(.circle) }
+    // Start by letting the user choose a style (Calm circle / Rolling hill).
+    func openBreathing() { step = .breathingPicker }
 
     /// Both onLevelComplete and onExit from games route here — post-game is now the
     /// single destination, and PostGameView handles the "still craving?" + level grid UX.
@@ -210,6 +211,7 @@ struct CravingInterventionFlow: View {
                     style: style,
                     onDone: { session.showBreathingPicker() }
                 )
+                .id(stepID(.breathing(style)))   // fresh state per breathing session
                 .transition(.opacity)
 
             case .breathingPicker:
