@@ -45,11 +45,14 @@ struct SliceTarget: Identifiable, Equatable {
         .templateImage("CannabisSearch")
     ]
     static let clear30Icons: [TargetIcon] = [
-        .image("Clear30Logo"), .image("Clear30Logo"),
         .sfSymbol("figure.walk"), .sfSymbol("figure.mind.and.body"),
         .sfSymbol("figure.run"), .sfSymbol("figure.cooldown"),
+        .sfSymbol("figure.yoga"), .sfSymbol("figure.strengthtraining.traditional"),
         .sfSymbol("heart.fill"), .sfSymbol("leaf.fill"),
-        .sfSymbol("sun.max.fill"), .sfSymbol("dumbbell.fill"), .sfSymbol("bicycle")
+        .sfSymbol("sun.max.fill"), .sfSymbol("dumbbell.fill"), .sfSymbol("bicycle"),
+        .sfSymbol("carrot.fill"), .sfSymbol("fork.knife"), .sfSymbol("moon.zzz.fill"),
+        .sfSymbol("book.fill"), .sfSymbol("cup.and.saucer.fill"), .sfSymbol("brain.head.profile"),
+        .sfSymbol("fish.fill"), .sfSymbol("mountain.2.fill"), .sfSymbol("hands.sparkles.fill")
     ]
 }
 
@@ -339,40 +342,47 @@ struct SliceGameView: CravingGameView {
     @State private var bursts: [SliceBurst] = []
     @State private var confetti: Int = 0
     @State private var levelCompleteTask: Task<Void, Never>?
+    @State private var started = false
+    @State private var currentMode: GameMode
+    @State private var showLevelPicker = false
+    let showIntro: Bool
 
-    init(intensity: CravingIntensity, mode: GameMode,
+    init(intensity: CravingIntensity, mode: GameMode, showIntro: Bool,
          onLevelComplete: @escaping (GameResult) -> Void,
          onExit: @escaping (GameResult) -> Void) {
         self.intensity = intensity
         self.mode = mode
+        self.showIntro = showIntro
         self.onLevelComplete = onLevelComplete
         self.onExit = onExit
+        _currentMode = State(initialValue: mode)
+        _started = State(initialValue: !showIntro)
     }
 
     var body: some View {
         GeometryReader { geo in
+            let size = arenaSize(geo: geo)
             ZStack {
                 Color.clear30Background.ignoresSafeArea()
-                arena(in: arenaSize(geo: geo))
+                arena(in: size)
                 PenaltyFlashView(trigger: engine.penaltyFlash)
 
                 VStack(spacing: 0) {
-                    GameTopBar(
-                        title: "Slice",
-                        subtitle: mode.isInfinite ? "Endless · slice cravings, dodge green" : "\(GameLevels.band(mode.levelValue)) · \(Int(engine.duration))s · slice cravings",
-                        mode: mode,
-                        gradient: intensity.gradient,
-                        onQuit: {
+                    HStack(spacing: GlobalData.shared.cardSpacing) {
+                        ScoreBadge(score: engine.score, gradient: intensity.gradient)
+                        if !currentMode.isInfinite {
+                            // A touch bigger than the score badge's star circle (26pt).
+                            timerRing.frame(width: 30, height: 30)
+                        }
+                        Spacer()
+                        LevelChip(mode: currentMode, onSelect: currentMode.isInfinite ? nil : { showLevelPicker = true })
+                        GameQuitButton {
                             engine.stop()
                             onExit(engine.makeResult(intensity: intensity, completed: false))
                         }
-                    )
+                    }
                     .padding(.horizontal, GlobalData.shared.horizontalPadding)
                     .padding(.top, GlobalData.shared.headingTopPadding * 2)
-
-                    hud
-                        .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                        .padding(.top, GlobalData.shared.cardSpacing)
 
                     Spacer()
 
@@ -381,17 +391,39 @@ struct SliceGameView: CravingGameView {
                             .padding(.bottom, GlobalData.shared.cardSpacing * 2)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
-                    endButton
-                        .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                        .padding(.bottom, GlobalData.shared.cardSpacing * 2)
                 }
                 .animation(GlobalData.shared.springAnimation, value: engine.penaltyToast)
 
                 if engine.cleared { LevelRewardOverlay(quote: engine.rewardQuote) }
+
+                if !started {
+                    GameIntroView(
+                        title: "Slice",
+                        symbol: "scissors",
+                        blurb: "Slice the cravings — leave the good stuff alone.",
+                        lines: [
+                            .init(icon: "hand.draw", text: "Swipe through red craving targets to slice them"),
+                            .init(icon: "leaf.fill", text: "Avoid the green Clear30 ones"),
+                            .init(icon: "timer", text: "Score as much as you can before time runs out")
+                        ],
+                        gradient: intensity.gradient
+                    ) { startGame(in: size) }
+                    .transition(.opacity)
+                }
             }
+            .onAppear { if !showIntro { startGame(in: size) } }
             .modifier(ConfettiPop(num: 50, radius: 240, confetti: $confetti))
-            .overlay { GameIntroOverlay(text: GameQuotes.intro(for: intensity)) }
-            .onAppear { engine.start(mode: mode, in: arenaSize(geo: geo)) }
+            .sheet(isPresented: $showLevelPicker) {
+                LevelPickerSheet(
+                    gameTitle: "Slice",
+                    gameName: "slice",
+                    current: currentMode.levelValue,
+                    gradient: intensity.gradient
+                ) { picked in
+                    currentMode = .level(picked)
+                    engine.start(mode: currentMode, in: size)
+                }
+            }
             .onDisappear {
                 levelCompleteTask?.cancel()
                 engine.stop()
@@ -471,41 +503,24 @@ struct SliceGameView: CravingGameView {
 
     // MARK: - HUD
 
-    private var hud: some View {
-        HStack(spacing: GlobalData.shared.cardSpacing) {
-            VStack(alignment: .leading, spacing: 2) {
-                TinyText(text: "Score").opacity(0.5)
-                Heading3(text: "\(engine.score)")
-            }
-            Spacer()
-            if !mode.isInfinite {
-                VStack(alignment: .leading, spacing: 4) {
-                    TinyText(text: "Time left").opacity(0.5)
-                    timeBar.frame(width: 130, height: 8)
-                }
-                Spacer()
-            }
-            if engine.combo > 1 {
-                VStack(alignment: .trailing, spacing: 2) {
-                    TinyText(text: "Combo").opacity(0.5)
-                    SmallText(text: "x\(engine.combo)")
-                        .foregroundStyle(GlobalData.shared.redGradient)
-                }
-                .transition(.opacity)
-            }
-        }
+    private func startGame(in size: CGSize) {
+        withAnimation(GlobalData.shared.springAnimation) { started = true }
+        engine.start(mode: currentMode, in: size)
     }
 
-    private var timeBar: some View {
-        GeometryReader { geo in
-            let ratio = engine.duration > 0 ? max(0, engine.remaining / engine.duration) : 0
-            ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 4).fill(Color.clear30OpacityGray)
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(intensity.gradient)
-                    .frame(width: geo.size.width * CGFloat(ratio))
-                    .animation(.linear(duration: 0.1), value: engine.remaining)
-            }
+    // Circular countdown ring — NOT red (brand gradient), no number. Depletes from the
+    // right (mirrored), so the arc drains the opposite way from the default.
+    private var timerRing: some View {
+        let ratio = engine.duration > 0 ? max(0, engine.remaining / engine.duration) : 0
+        return ZStack {
+            Circle().stroke(Color.clear30OpacityGray, lineWidth: 4)
+            Circle()
+                .trim(from: 0, to: CGFloat(ratio))
+                .stroke(GlobalData.shared.clear30Gradient,
+                        style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .scaleEffect(x: -1, y: 1)   // mirror → drain from the right
+                .animation(.linear(duration: 0.1), value: engine.remaining)
         }
     }
 
@@ -517,19 +532,4 @@ struct SliceGameView: CravingGameView {
             .shadow(color: GlobalData.shared.redColor1.opacity(0.5), radius: 16)
     }
 
-    private var endButton: some View {
-        Button {
-            GlobalData.shared.mediumImpact()
-            engine.stop()
-            onExit(engine.makeResult(intensity: intensity, completed: false))
-        } label: {
-            HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-                Image(systemName: "checkmark").foregroundColor(.white)
-                SmallText(text: "I'm good — end").foregroundColor(.white)
-            }
-            .frame(maxWidth: .infinity)
-            .modifier(CardStyle(gradient: GlobalData.shared.clear30Gradient))
-        }
-        .modifier(DefaultButtonStyle(shadow: false))
-    }
 }

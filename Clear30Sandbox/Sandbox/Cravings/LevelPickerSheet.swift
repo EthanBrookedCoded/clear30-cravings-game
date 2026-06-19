@@ -3,88 +3,247 @@
 //  Clear30Sandbox
 //
 //  Shared in-game chrome reused by all three games:
-//   • GameTopBar       — title + read-only level chip + quit button
-//   • GameIntroOverlay — quick-response capsule that fades in/out on open
+//   • LevelChip / GameQuitButton — composable top-bar pieces (no game titles/bands)
+//   • GameIntroView     — pre-game "get ready" intro every game shows before starting
+//   • ScoreBadge        — the score pill used by the scored games
+//   • LevelPickerSheet  — tapping the level chip opens this to jump levels
 //   • LevelRewardOverlay — confetti card shown on level completion
-//
-//  Level selection itself happens on the post-game screen now; the dedicated
-//  picker sheet that used to live here was removed.
 //
 
 import SwiftUI
 
-// MARK: - Shared in-game top bar (level shown as read-only chip + quit)
+// MARK: - In-game chrome pieces
+//
+// Game titles + difficulty bands were removed — the games are self-evident once open.
+// Each game composes its own top bar from these pieces (the level chip + quit X).
 
-struct GameTopBar: View {
-
-    let title: String
-    let subtitle: String
+struct LevelChip: View {
     let mode: GameMode
-    let gradient: LinearGradient
+    var onSelect: (() -> Void)? = nil
+
+    var body: some View {
+        if let onSelect {
+            Button {
+                GlobalData.shared.lightImpact()
+                onSelect()
+            } label: { chip(selectable: true) }
+            .modifier(DefaultButtonStyle(shadow: false))
+        } else {
+            chip(selectable: false)
+        }
+    }
+
+    private func chip(selectable: Bool) -> some View {
+        HStack(spacing: GlobalData.shared.cardSpacing / 4) {
+            Image(systemName: mode.isInfinite ? "infinity" : "flag.fill")
+            TinyText(text: mode.isInfinite ? "Endless" : "Lvl \(mode.levelValue)")
+            if selectable {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .opacity(0.5)
+            }
+        }
+        .foregroundColor(.clear30Text)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Capsule().fill(Color.clear30Button))
+    }
+}
+
+struct GameQuitButton: View {
     var onQuit: () -> Void
 
     var body: some View {
-        HStack(spacing: GlobalData.shared.cardSpacing) {
-            VStack(alignment: .leading, spacing: 2) {
-                SmallText(text: title)
-                TinyText(text: subtitle).opacity(0.5)
-            }
-            Spacer()
+        Button {
+            GlobalData.shared.lightImpact()
+            onQuit()
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundColor(.clear30Text.opacity(0.5))
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(Color.clear30Button))
+        }
+        .modifier(DefaultButtonStyle(shadow: false))
+    }
+}
 
-            // Read-only level chip — level selection now happens on the post-game screen.
-            HStack(spacing: GlobalData.shared.cardSpacing / 4) {
-                Image(systemName: mode.isInfinite ? "infinity" : "flag.fill")
-                TinyText(text: mode.isInfinite ? "Endless" : "Lvl \(mode.levelValue)")
-            }
-            .foregroundColor(.clear30Text)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.clear30Button))
+// MARK: - Score badge (used by scored games)
 
-            Button {
-                GlobalData.shared.lightImpact()
-                onQuit()
-            } label: {
-                Image(systemName: "xmark")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 14)
-                    .foregroundColor(.clear30Text.opacity(0.5))
+struct ScoreBadge: View {
+    let score: Int
+    var gradient: LinearGradient = GlobalData.shared.clear30Gradient
+
+    var body: some View {
+        HStack(spacing: GlobalData.shared.cardSpacing / 2) {
+            ZStack {
+                Circle().fill(gradient).frame(width: 26, height: 26)
+                Image(systemName: "star.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(.white)
             }
-            .modifier(DefaultButtonStyle(shadow: false))
+            Text("\(score)")
+                .font(.custom("Lexend", size: 20).weight(.semibold))
+                .foregroundColor(.clear30Text)
+                .contentTransition(.numericText())
+                .animation(.snappy, value: score)
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 14)
+        .padding(.vertical, 6)
+        .background(Capsule().fill(Color.clear30Button))
+        .overlay(Capsule().strokeBorder(gradient, lineWidth: 1).opacity(0.2))
+    }
+}
+
+// MARK: - Pre-game intro ("get ready")
+
+struct GameIntroLine: Identifiable {
+    let id = UUID()
+    let icon: String
+    let text: String
+}
+
+struct GameIntroView: View {
+
+    let title: String
+    let symbol: String
+    let blurb: String
+    let lines: [GameIntroLine]
+    let gradient: LinearGradient
+    var onStart: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.clear30Background.ignoresSafeArea()
+
+            VStack(spacing: GlobalData.shared.cardSpacing * 1.5) {
+                Spacer()
+
+                ZStack {
+                    Circle().fill(.white.opacity(0.25)).frame(width: 104, height: 104)
+                    Circle().fill(gradient).frame(width: 84, height: 84)
+                        .shadow(color: .clear30Shadow, radius: 16, y: 6)
+                    Image(systemName: symbol)
+                        .resizable().aspectRatio(contentMode: .fit).frame(width: 38)
+                        .foregroundColor(.white)
+                }
+
+                VStack(spacing: GlobalData.shared.cardSpacing / 2) {
+                    Heading2(text: title)
+                    SmallText(text: blurb).opacity(0.5).multilineTextAlignment(.center)
+                }
+
+                VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing) {
+                    ForEach(lines) { line in
+                        HStack(spacing: GlobalData.shared.cardSpacing) {
+                            ZStack {
+                                Circle().fill(Color.clear30Button).frame(width: 38, height: 38)
+                                Image(systemName: line.icon)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(gradient)
+                            }
+                            SmallText(text: line.text)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .padding(.vertical, GlobalData.shared.cardSpacing)
+                .padding(.horizontal, GlobalData.shared.cardSpacing)
+
+                Spacer()
+
+                Button {
+                    GlobalData.shared.mediumImpact()
+                    onStart()
+                } label: {
+                    SmallText(text: "Start").foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .modifier(CardStyle(gradient: gradient))
+                }
+                .modifier(DefaultButtonStyle(shadow: false))
+            }
+            .padding(.horizontal, GlobalData.shared.horizontalPadding)
+            .padding(.top, GlobalData.shared.headingTopPadding * 3)
+            .padding(.bottom, GlobalData.shared.cardSpacing * 3)
         }
     }
 }
 
-// MARK: - Quick-response intro overlay (fades in/out on game open)
+// MARK: - In-game level picker (tapping the level chip)
 
-struct GameIntroOverlay: View {
+struct LevelPickerSheet: View {
 
-    let text: String
-    @State private var visible = false
+    let gameTitle: String
+    let gameName: String
+    let current: Int
+    let gradient: LinearGradient
+    var onPick: (Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    private var unlocked: Int { CravingStore.maxUnlockedLevel(for: gameName) }
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 4)
 
     var body: some View {
-        VStack {
-            if visible {
-                SmallText(text: text)
-                    .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
-                    .padding(.vertical, GlobalData.shared.cardSpacing)
-                    .padding(.horizontal, GlobalData.shared.cardSpacing * 1.5)
-                    .background(Capsule().fill(GlobalData.shared.clear30Gradient))
-                    .shadow(color: .clear30Shadow, radius: 16, y: 4)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .padding(.top, GlobalData.shared.cardSpacing * 4)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Heading3(text: "\(gameTitle) levels")
+                Spacer()
+                TinyText(text: "\(unlocked) / \(CravingStore.maxLevel)").opacity(0.5)
             }
+            .padding(.bottom, GlobalData.shared.cardSpacing * 1.5)
+
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(1...CravingStore.maxLevel, id: \.self) { lvl in
+                    cell(lvl)
+                }
+            }
+
             Spacer()
         }
-        .allowsHitTesting(false)
-        .onAppear {
-            withAnimation(GlobalData.shared.springAnimation) { visible = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                withAnimation(GlobalData.shared.springAnimation) { visible = false }
+        .padding(.horizontal, GlobalData.shared.horizontalPadding)
+        .padding(.top, GlobalData.shared.headingTopPadding * 3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Color.clear30Background.ignoresSafeArea())
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func cell(_ lvl: Int) -> some View {
+        let isUnlocked = lvl <= unlocked
+        let isCurrent = lvl == current
+        return Button {
+            guard isUnlocked else { return }
+            GlobalData.shared.lightImpact()
+            onPick(lvl)
+            dismiss()
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 15)
+                    .fill(isCurrent ? AnyShapeStyle(gradient) : AnyShapeStyle(Color.clear30Button))
+                    .overlay {
+                        if !isCurrent {
+                            RoundedRectangle(cornerRadius: 15)
+                                .strokeBorder(Color.clear30OpacityGray, lineWidth: 1)
+                        }
+                    }
+                if isUnlocked {
+                    Text("\(lvl)")
+                        .font(.custom("Lexend", size: 17).weight(.semibold))
+                        .foregroundColor(isCurrent ? .white : .clear30Text)
+                } else {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.clear30Text.opacity(0.3))
+                }
             }
+            .frame(height: 56)
+            .opacity(isUnlocked ? 1 : 0.5)
         }
+        .modifier(DefaultButtonStyle(shadow: false, transition: false))
+        .disabled(!isUnlocked)
     }
 }
 

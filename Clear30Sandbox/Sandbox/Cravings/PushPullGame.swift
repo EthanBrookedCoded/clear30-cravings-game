@@ -123,8 +123,8 @@ final class PushPullEngine {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { [weak self] in self?.quoteText = nil }
         }
 
-        // Push = slow shrink + fade up; Pull = grow toward you + fade.
-        let duration = 0.55
+        // Push = slow shrink + fade up; Pull = grow toward you + fade. (Snappy, not sluggish.)
+        let duration = 0.38
         withAnimation(.easeInOut(duration: duration)) {
             if direction == .up {
                 topOffset = CGSize(width: 0, height: -screenHeight * 0.5)
@@ -137,6 +137,7 @@ final class PushPullEngine {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak self] in
             guard let self else { return }
+            // Snap the next card into place (no transition).
             if !self.deck.isEmpty { self.deck.removeFirst() }
             self.topOffset = .zero; self.topScale = 1; self.topOpacity = 1
             // Infinite mode: refill the deck so cards never run out.
@@ -223,7 +224,8 @@ struct PushPullCardView: View {
             gradient: gradient,
             outlineGradient: GlobalData.shared.whiteGradient,
             outlineWidth: 2,
-            outlineOpacity: 0.5
+            outlineOpacity: 0.5,
+            transition: false   // use an opacity transition (set in the card stack) instead of the default scale
         ))
     }
 }
@@ -238,66 +240,97 @@ struct PushPullGameView: CravingGameView {
     var onExit: (GameResult) -> Void
 
     @State private var engine = PushPullEngine()
+    @State private var started = false
+    @State private var currentMode: GameMode
+    @State private var showLevelPicker = false
+    let showIntro: Bool
 
-    init(intensity: CravingIntensity, mode: GameMode,
+    init(intensity: CravingIntensity, mode: GameMode, showIntro: Bool,
          onLevelComplete: @escaping (GameResult) -> Void,
          onExit: @escaping (GameResult) -> Void) {
         self.intensity = intensity
         self.mode = mode
+        self.showIntro = showIntro
         self.onLevelComplete = onLevelComplete
         self.onExit = onExit
+        _currentMode = State(initialValue: mode)
+        _started = State(initialValue: !showIntro)
     }
 
     var body: some View {
         GeometryReader { geo in
-            VStack(alignment: .leading, spacing: 0) {
-                GameTopBar(
-                    title: "Push & Pull",
-                    subtitle: mode.isInfinite ? "Endless · up = push, down = pull" : "\(GameLevels.band(mode.levelValue)) · up = push, down = pull",
-                    mode: mode,
-                    gradient: intensity.gradient,
-                    onQuit: { onExit(engine.makeResult(intensity: intensity, completed: false)) }
-                )
-                .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                .padding(.bottom, GlobalData.shared.cardSpacing)
+            ZStack {
+                gameContent(geo: geo)
 
-                progressDots
-                    .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                    .padding(.bottom, GlobalData.shared.cardSpacing)
-
-                Spacer(minLength: 0)
-
-                ZStack {
-                    behindCard
-                    topCard(screenHeight: geo.size.height)
+                if !started {
+                    GameIntroView(
+                        title: "Push & Pull",
+                        symbol: "arrow.up.arrow.down",
+                        blurb: "Sort what holds you back from what moves you forward.",
+                        lines: [
+                            .init(icon: "arrow.up", text: "Swipe cravings UP to push them away"),
+                            .init(icon: "arrow.down", text: "Swipe your goals DOWN to pull them close")
+                        ],
+                        gradient: intensity.gradient
+                    ) { startGame() }
+                    .transition(.opacity)
                 }
-                .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                .frame(maxWidth: .infinity)
-
-                Spacer(minLength: 0)
-
-                instructionPill
-                    .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                    .padding(.bottom, GlobalData.shared.cardSpacing * 2)
             }
-            .padding(.top, GlobalData.shared.headingTopPadding * 2)
+            .onAppear { if !showIntro { startGame() } }   // relaunched from post-game → skip intro
         }
-        .overlay { GameIntroOverlay(text: GameQuotes.intro(for: intensity)) }
         .overlay { quoteOverlay }
-        .onAppear { engine.start(mode: mode) }
+        .sheet(isPresented: $showLevelPicker) {
+            LevelPickerSheet(
+                gameTitle: "Push & Pull",
+                gameName: "push_pull",
+                current: currentMode.levelValue,
+                gradient: intensity.gradient
+            ) { picked in
+                currentMode = .level(picked)
+                engine.start(mode: currentMode)
+            }
+        }
         .onChange(of: engine.cleared) { _, done in
             if done { onLevelComplete(engine.makeResult(intensity: intensity, completed: true)) }
         }
     }
 
+    private func startGame() {
+        withAnimation(GlobalData.shared.springAnimation) { started = true }
+        engine.start(mode: currentMode)
+    }
+
+    private func gameContent(geo: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: GlobalData.shared.cardSpacing) {
+                progressDots
+                Spacer(minLength: GlobalData.shared.cardSpacing)
+                LevelChip(mode: currentMode, onSelect: currentMode.isInfinite ? nil : { showLevelPicker = true })
+                GameQuitButton { onExit(engine.makeResult(intensity: intensity, completed: false)) }
+            }
+            .padding(.horizontal, GlobalData.shared.horizontalPadding)
+            .padding(.bottom, GlobalData.shared.cardSpacing)
+
+            Spacer(minLength: 0)
+
+            cardStack(screenHeight: geo.size.height)
+                .padding(.horizontal, GlobalData.shared.horizontalPadding)
+                .frame(maxWidth: .infinity)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, GlobalData.shared.headingTopPadding * 2)
+    }
+
     @ViewBuilder
     private var progressDots: some View {
-        if !mode.isInfinite {
+        if !currentMode.isInfinite {
             HStack(spacing: 4) {
                 ForEach(0..<engine.cardsToClear, id: \.self) { i in
                     Circle()
-                        .fill(i < engine.correctCount ? Color.clear30Text.opacity(0.75) : Color.clear30Text.opacity(0.25))
+                        .fill(i < engine.correctCount ? AnyShapeStyle(intensity.gradient) : AnyShapeStyle(Color.clear30Text.opacity(0.2)))
                         .frame(width: 6, height: 6)
+                        .animation(GlobalData.shared.springAnimation, value: engine.correctCount)
                 }
             }
         } else {
@@ -305,38 +338,44 @@ struct PushPullGameView: CravingGameView {
         }
     }
 
-    @ViewBuilder
-    private var behindCard: some View {
-        if engine.deck.count > 1 {
-            PushPullCardView(card: engine.deck[1])
-                .scaleEffect(0.94).opacity(0.5).offset(y: 12)
+    private func cardStack(screenHeight: CGFloat) -> some View {
+        ZStack {
+            // Card behind (depth) — a peeking, dimmed card so you can see there's another one.
+            if engine.deck.count > 1 {
+                PushPullCardView(card: engine.deck[1])
+                    .scaleEffect(0.92)
+                    .offset(y: 16)
+                    .opacity(0.55)
+            }
+            // Current card — swipes off via the engine offset; the next one just snaps into
+            // place (no transition/animation).
+            if let top = engine.deck.first {
+                PushPullCardView(card: top)
+                    .scaleEffect(engine.topScale)
+                    .opacity(engine.topOpacity)
+                    .offset(engine.topOffset)
+                    .rotationEffect(.degrees(Double(engine.topOffset.height) / 30))
+                    .overlay(alignment: .top) { feedbackOverlay }
+                    .gesture(
+                        DragGesture()
+                            .onChanged { engine.onDragChanged($0) }
+                            .onEnded { engine.onDragEnded($0, screenHeight: screenHeight) }
+                    )
+                    .zIndex(1)
+            }
         }
     }
 
     @ViewBuilder
-    private func topCard(screenHeight: CGFloat) -> some View {
-        if let top = engine.deck.first {
-            PushPullCardView(card: top)
-                .scaleEffect(engine.topScale)
-                .opacity(engine.topOpacity)
-                .offset(engine.topOffset)
-                .rotationEffect(.degrees(Double(engine.topOffset.height) / 30))
-                .gesture(
-                    DragGesture()
-                        .onChanged { engine.onDragChanged($0) }
-                        .onEnded { engine.onDragEnded($0, screenHeight: screenHeight) }
-                )
-                .overlay(alignment: .top) {
-                    if let text = engine.feedbackText {
-                        TinyText(text: text)
-                            .foregroundColor(.white)
-                            .padding(.vertical, GlobalData.shared.cardSpacing / 2)
-                            .padding(.horizontal, GlobalData.shared.cardSpacing)
-                            .background(RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5).fill(Color.black.opacity(0.5)))
-                            .offset(y: -GlobalData.shared.cardSpacing * 2)
-                            .transition(.opacity)
-                    }
-                }
+    private var feedbackOverlay: some View {
+        if let text = engine.feedbackText {
+            TinyText(text: text)
+                .foregroundColor(.white)
+                .padding(.vertical, GlobalData.shared.cardSpacing / 2)
+                .padding(.horizontal, GlobalData.shared.cardSpacing)
+                .background(RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5).fill(Color.black.opacity(0.5)))
+                .offset(y: -GlobalData.shared.cardSpacing * 2)
+                .transition(.opacity)
         }
     }
 
@@ -360,12 +399,4 @@ struct PushPullGameView: CravingGameView {
         }
     }
 
-    private var instructionPill: some View {
-        HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-            Image(systemName: "arrow.up").opacity(0.5)
-            TinyText(text: "Push weed up · pull goals down").opacity(0.5)
-            Image(systemName: "arrow.down").opacity(0.5)
-        }
-        .frame(maxWidth: .infinity)
-    }
 }

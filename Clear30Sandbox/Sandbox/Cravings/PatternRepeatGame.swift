@@ -10,16 +10,19 @@
 
 import SwiftUI
 
-struct PatternPad {
-    let gradient: LinearGradient
-    let sfSymbol: String
-}
+// Fixed gradient per pad position; the glyphs are picked at random from this pool each
+// time the game opens, so the four tiles vary session to session.
+private let padGradients: [LinearGradient] = [
+    GlobalData.shared.clear30Gradient,
+    GlobalData.shared.meditationGradient,
+    GlobalData.shared.claireGradient,
+    GlobalData.shared.symptomCardGradient
+]
 
-private let pads: [PatternPad] = [
-    PatternPad(gradient: GlobalData.shared.clear30Gradient,    sfSymbol: "leaf.fill"),
-    PatternPad(gradient: GlobalData.shared.claireGradient,     sfSymbol: "sparkles"),
-    PatternPad(gradient: GlobalData.shared.meditationGradient, sfSymbol: "moon.stars.fill"),
-    PatternPad(gradient: GlobalData.shared.symptomCardGradient,sfSymbol: "sun.max.fill")
+private let patternIconPool: [String] = [
+    "leaf.fill", "drop.fill", "moon.fill", "sun.max.fill", "sparkles",
+    "flame.fill", "snowflake", "cloud.fill", "bolt.fill", "star.fill",
+    "heart.fill", "wind"
 ]
 
 // MARK: - Engine
@@ -37,6 +40,8 @@ final class PatternEngine {
     var score: Int = 0
     var maxLength: Int = 0
     var startedAt = Date()
+    var padSymbols: [String] = []     // the four glyphs for this session (random)
+    var padColorOrder: [Int] = [0, 1, 2, 3]   // which gradient each pad uses (shuffled)
 
     var mode: GameMode = .level(1)
     var rewardQuote: String = ""
@@ -61,6 +66,9 @@ final class PatternEngine {
         self.mode = mode
         sequence = []; inputIndex = 0; score = 0; maxLength = 0
         startedAt = Date()
+        // Re-randomize the glyphs AND the colours each start (so a failed retry looks fresh).
+        padSymbols = Array(patternIconPool.shuffled().prefix(cellCount))
+        padColorOrder = Array(0..<cellCount).shuffled()
         nextRound()
     }
 
@@ -79,7 +87,11 @@ final class PatternEngine {
         if index == sequence[inputIndex] {
             GlobalData.shared.lightImpact()
             activeCell = index
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in self?.activeCell = nil }
+            // Hold the highlight briefly; the view animates it in AND out (see padCell).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self] in
+                guard let self else { return }
+                if self.activeCell == index { self.activeCell = nil }
+            }
             score += 10 * max(1, level)
             inputIndex += 1
             if inputIndex >= sequence.count {
@@ -124,8 +136,8 @@ final class PatternEngine {
             if Task.isCancelled { return }
             await MainActor.run { activeCell = index }
             try? await Task.sleep(nanoseconds: UInt64(s * 1e9))
-            await MainActor.run { activeCell = nil }
-            try? await Task.sleep(nanoseconds: UInt64(0.1 * 1e9))
+            await MainActor.run { activeCell = nil }   // view animates the fade-out (see padCell)
+            try? await Task.sleep(nanoseconds: UInt64(0.14 * 1e9))
         }
         if Task.isCancelled { return }
         await MainActor.run { phase = .awaitingInput }
@@ -135,6 +147,16 @@ final class PatternEngine {
 }
 
 // MARK: - Pad
+
+// Immediate press feedback (scales down the instant a finger lands) — much more responsive
+// feeling than a tap gesture, and Button registers taps reliably.
+private struct PadButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.93 : 1)
+            .animation(.easeOut(duration: 0.10), value: configuration.isPressed)
+    }
+}
 
 struct PatternPadView: View {
     @Bindable var engine: PatternEngine
@@ -153,30 +175,51 @@ struct PatternPadView: View {
     }
 
     private func padCell(_ index: Int, _ size: CGFloat) -> some View {
-        let pad = pads[index]
+        let colorIndex = index < engine.padColorOrder.count ? engine.padColorOrder[index] : index
+        let gradient = padGradients[colorIndex]
+        let symbol = index < engine.padSymbols.count ? engine.padSymbols[index] : "circle.fill"
         let active = engine.activeCell == index
         let wrong = engine.wrongCell == index
+        // Inactive tiles are dimmed back (faded); the highlighted tile is full opacity with a
+        // white sheen so it lights up. Both animate in AND out via the token.
+        let awake = engine.phase == .awaitingInput
+        let cellOpacity: Double = (active || awake) ? 1 : 0.4
+        let animToken = [engine.activeCell ?? -1, engine.wrongCell ?? -1, awake ? 1 : 0]
+
         return Button {
             engine.handleTap(index)
         } label: {
-            ZStack {
-                Circle().fill(.white.opacity(active ? 0.75 : 0.25))
-                Circle().fill(pad.gradient).padding(GlobalData.shared.cardSpacing / 2)
-                Circle().fill(.white).padding(GlobalData.shared.cardSpacing * 1.5)
-                    .shadow(color: .white.opacity(active ? 0.75 : 0), radius: 18)
-                    .overlay {
-                        Image(systemName: pad.sfSymbol)
-                            .resizable().aspectRatio(contentMode: .fit)
-                            .padding(GlobalData.shared.cardSpacing * 2.5)
-                            .foregroundStyle(pad.gradient)
-                    }
-            }
-            .frame(width: size, height: size)
-            .scaleEffect(active ? 1.08 : (wrong ? 0.95 : 1.0))
-            .animation(.easeOut(duration: 0.18), value: active)
-            .animation(.easeOut(duration: 0.18), value: wrong)
+            RoundedRectangle(cornerRadius: 30, style: .continuous)
+                .fill(gradient)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .fill(LinearGradient(colors: [.white.opacity(0.35), .clear],
+                                             startPoint: .top, endPoint: .center))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .strokeBorder(.white.opacity(0.4), lineWidth: 1.5)
+                )
+                // White sheen that lights up the active tile (animates in/out).
+                .overlay(
+                    RoundedRectangle(cornerRadius: 30, style: .continuous)
+                        .fill(.white)
+                        .opacity(active ? 0.35 : 0)
+                )
+                .overlay(
+                    Image(systemName: symbol)
+                        .font(.system(size: size * 0.3, weight: .semibold))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.15), radius: 4, y: 2)
+                )
+                .frame(width: size, height: size)
+                .scaleEffect(active ? 1.06 : (wrong ? 0.94 : 1.0))
+                .opacity(cellOpacity)
+                .shadow(color: active ? .white.opacity(0.6) : .clear30Shadow,
+                        radius: active ? 20 : 8, y: active ? 0 : 4)
+                .animation(.easeInOut(duration: 0.22), value: animToken)
         }
-        .modifier(DefaultButtonStyle(shadow: false))
+        .buttonStyle(PadButtonStyle())
         .disabled(engine.phase != .awaitingInput)
     }
 }
@@ -193,55 +236,61 @@ struct PatternRepeatGameView: CravingGameView {
     @State private var engine = PatternEngine()
     @State private var confetti = 0
     @State private var levelCompleteTask: Task<Void, Never>?
+    @State private var started = false
+    @State private var currentMode: GameMode
+    @State private var showLevelPicker = false
+    @State private var padScale: CGFloat = 1
+    let showIntro: Bool
 
-    init(intensity: CravingIntensity, mode: GameMode,
+    init(intensity: CravingIntensity, mode: GameMode, showIntro: Bool,
          onLevelComplete: @escaping (GameResult) -> Void,
          onExit: @escaping (GameResult) -> Void) {
         self.intensity = intensity
         self.mode = mode
+        self.showIntro = showIntro
         self.onLevelComplete = onLevelComplete
         self.onExit = onExit
+        _currentMode = State(initialValue: mode)
+        _started = State(initialValue: !showIntro)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GameTopBar(
-                title: "Pattern",
-                subtitle: mode.isInfinite ? "Endless · watch then repeat" : "\(GameLevels.band(mode.levelValue)) · watch then repeat",
-                mode: mode,
-                gradient: intensity.gradient,
-                onQuit: { engine.stop(); onExit(engine.makeResult(intensity: intensity, completed: false)) }
-            )
-            .padding(.horizontal, GlobalData.shared.horizontalPadding)
-            .padding(.bottom, GlobalData.shared.cardSpacing)
+        ZStack {
+            gameContent
 
-            statusRow
-                .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                .padding(.bottom, GlobalData.shared.cardSpacing * 2)
-
-            ZStack {
-                PatternPadView(engine: engine)
-                    .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                if engine.phase == .levelCleared {
-                    LevelRewardOverlay(quote: engine.rewardQuote)
-                }
+            if !started {
+                GameIntroView(
+                    title: "Pattern",
+                    symbol: "square.grid.2x2.fill",
+                    blurb: "A memory game — watch, then tap it back.",
+                    lines: [
+                        .init(icon: "eye", text: "Watch the tiles light up in order"),
+                        .init(icon: "hand.tap", text: "Repeat the sequence from memory"),
+                        .init(icon: "chart.line.uptrend.xyaxis", text: "It grows each round — clear the level to win")
+                    ],
+                    gradient: intensity.gradient
+                ) { startGame() }
+                .transition(.opacity)
             }
-            .frame(maxHeight: .infinity)
-            .modifier(ConfettiPop(num: 50, radius: 220, confetti: $confetti))
-
-            footer
-                .padding(.horizontal, GlobalData.shared.horizontalPadding)
-                .padding(.vertical, GlobalData.shared.cardSpacing * 2)
         }
-        .padding(.top, GlobalData.shared.headingTopPadding * 2)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .overlay { GameIntroOverlay(text: GameQuotes.intro(for: intensity)) }
-        .onAppear { engine.start(mode: mode) }
+        .onAppear { if !showIntro { startGame() } }
+        .sheet(isPresented: $showLevelPicker) {
+            LevelPickerSheet(
+                gameTitle: "Pattern",
+                gameName: "pattern_repeat",
+                current: currentMode.levelValue,
+                gradient: intensity.gradient
+            ) { picked in
+                currentMode = .level(picked)
+                engine.start(mode: currentMode)
+            }
+        }
         .onDisappear {
             levelCompleteTask?.cancel()
             engine.stop()
         }
         .onChange(of: engine.phase) { _, phase in
+            if phase == .awaitingInput { pulsePads() }
             if phase == .levelCleared {
                 confetti += 1
                 levelCompleteTask?.cancel()
@@ -256,72 +305,67 @@ struct PatternRepeatGameView: CravingGameView {
         }
     }
 
-    private var statusRow: some View {
-        HStack(spacing: GlobalData.shared.cardSpacing) {
-            VStack(alignment: .leading, spacing: 2) {
-                TinyText(text: "Score").opacity(0.5)
-                Text("\(engine.score)")
-                    .font(.custom("Lexend", size: 25).weight(.medium))
-                    .contentTransition(.numericText())
-                    .foregroundStyle(intensity.gradient)
-                    .animation(.snappy, value: engine.score)
+    private func startGame() {
+        withAnimation(GlobalData.shared.springAnimation) { started = true }
+        engine.start(mode: currentMode)
+    }
+
+    // Dip the whole pad grid and spring it back — the "it's your turn" cue.
+    private func pulsePads() {
+        withAnimation(.easeIn(duration: 0.16)) { padScale = 0.9 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.5)) { padScale = 1 }
+        }
+    }
+
+    private var gameContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                ScoreBadge(score: engine.score, gradient: intensity.gradient)
+                Spacer()
+                LevelChip(mode: currentMode, onSelect: currentMode.isInfinite ? nil : { showLevelPicker = true })
+                GameQuitButton { engine.stop(); onExit(engine.makeResult(intensity: intensity, completed: false)) }
             }
-            Spacer()
-            phaseChip
-        }
-    }
+            .padding(.horizontal, GlobalData.shared.horizontalPadding)
+            .padding(.bottom, GlobalData.shared.cardSpacing * 2)
 
-    @ViewBuilder
-    private var phaseChip: some View {
-        switch engine.phase {
-        case .idle, .watching: chip("eye", "Watch")
-        case .awaitingInput:   chip("hand.tap", "Your turn")
-        case .levelCleared:    chip("checkmark.seal.fill", "Cleared!")
-        case .failure:         chip("exclamationmark.circle", "Retry")
-        }
-    }
+            ZStack {
+                // When it's the user's turn the whole grid dips and springs back up — a
+                // motion cue that it's time to tap (replaces the old "Your turn" tag).
+                PatternPadView(engine: engine)
+                    .scaleEffect(padScale)
+                    .padding(.horizontal, GlobalData.shared.horizontalPadding)
 
-    private func chip(_ icon: String, _ text: String) -> some View {
-        HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-            Image(systemName: icon)
-            TinyText(text: text)
-        }
-        .foregroundColor(.clear30Text)
-        .padding(.horizontal, 10).padding(.vertical, 5)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.clear30Button))
-    }
-
-    @ViewBuilder
-    private var footer: some View {
-        if engine.phase == .failure {
-            HStack(spacing: GlobalData.shared.cardSpacing) {
-                pill("Try again", filled: true) { GlobalData.shared.lightImpact(); engine.restart() }
-                pill("End", filled: false) {
-                    GlobalData.shared.mediumImpact()
-                    engine.stop()
-                    onExit(engine.makeResult(intensity: intensity, completed: false))
+                if engine.phase == .levelCleared {
+                    LevelRewardOverlay(quote: engine.rewardQuote)
                 }
             }
-        } else {
-            pill("I'm good — end", filled: false) {
-                GlobalData.shared.mediumImpact()
-                engine.stop()
-                onExit(engine.makeResult(intensity: intensity, completed: false))
-            }
+            .frame(maxHeight: .infinity)
+            .modifier(ConfettiPop(num: 50, radius: 220, confetti: $confetti))
+
+            footer
+                .padding(.horizontal, GlobalData.shared.horizontalPadding)
+                .padding(.vertical, GlobalData.shared.cardSpacing * 2)
         }
+        .padding(.top, GlobalData.shared.headingTopPadding * 2)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func pill(_ text: String, filled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            SmallText(text: text)
-                .foregroundColor(filled ? .white : .clear30Text)
+    // Always present (so failing doesn't shift the board) — just fades in on failure.
+    // Quitting is handled by the X in the top bar.
+    private var footer: some View {
+        Button {
+            GlobalData.shared.lightImpact()
+            engine.restart()
+        } label: {
+            SmallText(text: "Try again")
+                .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .modifier(CardStyle(
-                    color: filled ? .clear : .clear30Button,
-                    shadowColor: .clear,
-                    gradient: filled ? intensity.gradient : nil
-                ))
+                .modifier(CardStyle(gradient: intensity.gradient))
         }
         .modifier(DefaultButtonStyle(shadow: false))
+        .opacity(engine.phase == .failure ? 1 : 0)
+        .allowsHitTesting(engine.phase == .failure)
+        .animation(.easeInOut(duration: 0.2), value: engine.phase)
     }
 }

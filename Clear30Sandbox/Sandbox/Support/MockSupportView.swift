@@ -35,10 +35,9 @@ struct MockSupportView: View {
         }
         .sheet(isPresented: $showCravings) {
             CravingInterventionFlow(
-                onDismiss: { showCravings = false },
-                // SANDBOX: in the real app this navigates to Claire chat
-                onOpenClaire: { _ in showCravings = false }
+                onDismiss: { showCravings = false }
             )
+            .presentationDragIndicator(.visible)
         }
         .sheet(item: $showStub) { stub in
             stubSheet(stub)

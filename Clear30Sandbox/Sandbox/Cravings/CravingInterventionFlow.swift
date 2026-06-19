@@ -3,16 +3,24 @@
 //  Clear30Sandbox
 //
 //  Coordinator for the cravings flow.
-//  intensity → (game opens on Easy) → level complete → "still craving?"
-//  Breathing tile bypasses games entirely.
+//
+//  Navigation (redesign):
+//    hub → (game) playing → post → hub
+//    hub → meditation  : opens MeditationPlayerView as a STACKED SHEET
+//    hub → breathwork  : opens BreathingView as a STACKED SHEET (pre-selected cadence)
+//
+//  The intensity question is gone — the hub surfaces Meditations / Breathwork / Games
+//  directly. Each game still maps 1:1 to a CravingIntensity (kept as the game key so the
+//  three existing game views need no changes).
 //
 //  SANDBOX: when copied into the real app, swap the analytics no-ops for
-//  Logger.logEvent(...) and CravingStore for userInfo cached values.
+//  Logger.logEvent(...) and CravingStore for userInfo cached values. Meditations should
+//  be backed by MeditationResources(kind: .craving) (see CravingResources.swift).
 //
 
 import SwiftUI
 
-// MARK: - Intensity (3 levels — one per game)
+// MARK: - Game key (one per game)
 
 enum CravingIntensity: String, CaseIterable, Identifiable, Codable {
     case little
@@ -52,6 +60,26 @@ enum CravingIntensity: String, CaseIterable, Identifiable, Codable {
         case .extreme:  return "slice"
         }
     }
+
+    // Hub display
+    var gameTitle: String {
+        switch self {
+        case .little:   return "Push & Pull"
+        case .moderate: return "Pattern"
+        case .extreme:  return "Slice"
+        }
+    }
+
+    var gameTileSymbol: String {
+        switch self {
+        case .little:   return "arrow.left.arrow.right"
+        case .moderate: return "square.grid.2x2.fill"
+        case .extreme:  return "scissors"
+        }
+    }
+
+    /// Order shown in the games grid (gentlest → strongest).
+    static var hubOrder: [CravingIntensity] { [.little, .moderate, .extreme] }
 }
 
 // MARK: - Game mode + level helpers
@@ -103,63 +131,24 @@ struct GameResult {
 @Observable
 final class CravingSession {
 
-    enum Step: Equatable {
-        case intensity
-        case playing(CravingIntensity, GameMode)
+    enum Step {
+        case hub
+        case playing(CravingIntensity, GameMode, Bool)   // Bool = show the pre-game intro
         case post(GameResult)
-        case breathing(BreathingStyle)
-        case breathingPicker
-
-        static func == (lhs: Step, rhs: Step) -> Bool {
-            switch (lhs, rhs) {
-            case (.intensity, .intensity): return true
-            case (.playing(let a, let am), .playing(let b, let bm)): return a == b && am == bm
-            case (.post(let a), .post(let b)): return a.game == b.game && a.score == b.score && a.levelReached == b.levelReached
-            case (.breathing(let a), .breathing(let b)): return a == b
-            case (.breathingPicker, .breathingPicker): return true
-            default: return false
-            }
-        }
     }
 
-    var step: Step = .intensity
+    var step: Step = .hub
     let sessionID: String = UUID().uuidString
     let startedAt: Date = Date()
 
-    /// Pick the starting mode for an intensity. Extreme resumes Slice at the highest unlocked level
-    /// per Fred: maximum engagement when the user needs it most.
-    func selectIntensity(_ intensity: CravingIntensity) {
-        if intensity == .extreme {
-            let unlocked = CravingStore.maxUnlockedLevel(for: intensity.gameName)
-            step = .playing(intensity, .level(unlocked))
-        } else {
-            step = .playing(intensity, .level(1))
-        }
+    func playGame(_ intensity: CravingIntensity, level: Int, showIntro: Bool) {
+        step = .playing(intensity, .level(level), showIntro)
     }
 
-    // Start by letting the user choose a style (Calm circle / Rolling hill).
-    func openBreathing() { step = .breathingPicker }
-
-    /// Both onLevelComplete and onExit from games route here — post-game is now the
-    /// single destination, and PostGameView handles the "still craving?" + level grid UX.
+    /// Both onLevelComplete and onExit-with-completion route here.
     func finishGame(_ result: GameResult) { step = .post(result) }
 
-    /// "Yes — restart same level" from the post-game still-craving row.
-    func restartSameLevel(after result: GameResult) {
-        if result.wasInfinite {
-            step = .playing(result.intensity, .infinite)
-        } else {
-            step = .playing(result.intensity, .level(result.levelReached))
-        }
-    }
-
-    /// Picking a specific level/Infinite tile from the post-game grid.
-    func playLevel(_ mode: GameMode, intensity: CravingIntensity) {
-        step = .playing(intensity, mode)
-    }
-
-    func tryAnother() { step = .intensity }
-    func showBreathingPicker() { step = .breathingPicker }
+    func backToHub() { step = .hub }
 }
 
 // MARK: - Coordinator
@@ -167,9 +156,11 @@ final class CravingSession {
 struct CravingInterventionFlow: View {
 
     var onDismiss: () -> Void
-    var onOpenClaire: (String) -> Void
 
     @State private var session = CravingSession()
+    // Stacked sheets presented on top of the hub.
+    @State private var activeMeditation: CravingMeditation? = nil
+    @State private var breathworkCadence: BreathingCadence? = nil
 
     private var animation: Animation { GlobalData.shared.springAnimation.speed(0.9) }
 
@@ -178,75 +169,65 @@ struct CravingInterventionFlow: View {
             Color.clear30Background.ignoresSafeArea()
 
             switch session.step {
-            case .intensity:
-                IntensitySelectView(
-                    onSelect: { session.selectIntensity($0) },
-                    onBreathe: { session.openBreathing() }
+            case .hub:
+                CravingHubView(
+                    onPlayMeditation: { activeMeditation = $0 },
+                    onBreathe: { breathworkCadence = $0 },
+                    onPlayGame: { intensity in
+                        session.playGame(intensity, level: CravingStore.maxUnlockedLevel(for: intensity.gameName), showIntro: true)
+                    }
                 )
                 .transition(.opacity)
 
-            case .playing(let intensity, let mode):
-                gameView(for: intensity, mode: mode)
-                    .id(stepID(.playing(intensity, mode)))   // force fresh view on level/mode change
+            case .playing(let intensity, let mode, let showIntro):
+                gameView(for: intensity, mode: mode, showIntro: showIntro)
+                    .id(stepID(session.step))   // force fresh view on level/mode change
                     .transition(.opacity)
 
             case .post(let result):
                 PostGameView(
                     result: result,
-                    onRestartSameLevel: { session.restartSameLevel(after: result) },
-                    onPickLevel: { mode in session.playLevel(mode, intensity: result.intensity) },
-                    onTryAnother: { session.tryAnother() },
-                    onClaire: {
-                        let prompt = "I just used the craving tool. My craving was \(result.intensity.title). Can we talk through it?"
-                        onOpenClaire(prompt)
-                    },
-                    onBreathe: { session.openBreathing() },
-                    onDone: { onDismiss() },
-                    onRate: { _ in }
-                )
-                .transition(.opacity)
-
-            case .breathing(let style):
-                BreathingView(
-                    style: style,
-                    onDone: { session.showBreathingPicker() }
-                )
-                .id(stepID(.breathing(style)))   // fresh state per breathing session
-                .transition(.opacity)
-
-            case .breathingPicker:
-                BreathingPickerView(
-                    onPick: { session.step = .breathing($0) },
-                    onDone: { onDismiss() }
+                    // Replaying / advancing from the post-game skips the intro.
+                    onPlayLevel: { level in session.playGame(result.intensity, level: level, showIntro: false) },
+                    onDone: { session.backToHub() }
                 )
                 .transition(.opacity)
             }
         }
         .animation(animation, value: stepID(session.step))
+        // Meditation player — stacked sheet (mirrors the real MeditationResources flow).
+        .sheet(item: $activeMeditation) { med in
+            MeditationPlayerView(meditation: med)
+                .presentationDragIndicator(.visible)
+        }
+        // Breathwork — stacked sheet, opened on the chosen cadence.
+        .sheet(item: $breathworkCadence) { cadence in
+            BreathingView(initialCadence: cadence)
+                .presentationDragIndicator(.visible)
+        }
     }
 
     @ViewBuilder
-    private func gameView(for intensity: CravingIntensity, mode: GameMode) -> some View {
+    private func gameView(for intensity: CravingIntensity, mode: GameMode, showIntro: Bool) -> some View {
         let onLevelComplete: (GameResult) -> Void = { session.finishGame($0) }
-        let onExit:          (GameResult) -> Void = { session.finishGame($0) }
+        // Quitting a game returns to the hub (no celebration screen for an abandoned run).
+        let onExit:          (GameResult) -> Void = { _ in session.backToHub() }
 
         switch intensity {
         case .little:
-            PushPullGameView(intensity: intensity, mode: mode, onLevelComplete: onLevelComplete, onExit: onExit)
+            PushPullGameView(intensity: intensity, mode: mode, showIntro: showIntro, onLevelComplete: onLevelComplete, onExit: onExit)
         case .moderate:
-            PatternRepeatGameView(intensity: intensity, mode: mode, onLevelComplete: onLevelComplete, onExit: onExit)
+            PatternRepeatGameView(intensity: intensity, mode: mode, showIntro: showIntro, onLevelComplete: onLevelComplete, onExit: onExit)
         case .extreme:
-            SliceGameView(intensity: intensity, mode: mode, onLevelComplete: onLevelComplete, onExit: onExit)
+            SliceGameView(intensity: intensity, mode: mode, showIntro: showIntro, onLevelComplete: onLevelComplete, onExit: onExit)
         }
     }
 
     private func stepID(_ step: CravingSession.Step) -> String {
         switch step {
-        case .intensity: return "intensity"
-        case .playing(let i, let m): return "playing_\(i.rawValue)_\(m.isInfinite ? "inf" : "\(m.levelValue)")"
+        case .hub: return "hub"
+        case .playing(let i, let m, _): return "playing_\(i.rawValue)_\(m.isInfinite ? "inf" : "\(m.levelValue)")"
         case .post(let r): return "post_\(r.game)_\(r.levelReached)_\(r.score)"
-        case .breathing(let s): return "breathing_\(s.rawValue)"
-        case .breathingPicker: return "breathingPicker"
         }
     }
 }
@@ -256,6 +237,7 @@ struct CravingInterventionFlow: View {
 protocol CravingGameView: View {
     init(intensity: CravingIntensity,
          mode: GameMode,
+         showIntro: Bool,
          onLevelComplete: @escaping (GameResult) -> Void,
          onExit: @escaping (GameResult) -> Void)
 }

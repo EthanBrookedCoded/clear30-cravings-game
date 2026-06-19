@@ -1,0 +1,642 @@
+:root {
+  --c-blue: #5bb4a9;
+  --c-green: #80c97a;
+  --c-yellow: #fff87e;
+  --c-med1: #5b9cf0;
+  --c-med2: #5baee6;
+  --c-bg: #ffffff;
+  --c-button: #f1f1f5;
+  --c-text: #1c1c1e;
+  --c-text-50: rgba(28, 28, 30, 0.5);
+  --c-text-75: rgba(28, 28, 30, 0.75);
+  --c-text-25: rgba(28, 28, 30, 0.25);
+  --c-shadow: rgba(0, 0, 0, 0.22);
+  --c-gray: rgba(120, 120, 128, 0.22);
+
+  --g-clear30: linear-gradient(90deg, #5bb4a9 0%, #80c97a 100%);
+  --g-meditation: linear-gradient(90deg, #5b9cf0 0%, #5baee6 100%);
+  --g-claire: linear-gradient(90deg, #5c70ef 0%, #8969ff 100%);
+  --g-red: linear-gradient(45deg, #f65555 0%, #fb5151 100%);
+  --g-sleep: linear-gradient(45deg, #14435e 0%, #1c5e80 100%);
+  --g-symptom: linear-gradient(45deg, #ff8c59 0%, #ffa372 100%);
+
+  --radius: 21px;
+  --card-spacing: 14px;
+  --hpad: 25px;
+
+  --font: 'Lexend', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--c-text);
+  background:
+    radial-gradient(1200px 800px at 15% -10%, rgba(91, 180, 169, 0.12), transparent 60%),
+    radial-gradient(1100px 700px at 110% 10%, rgba(92, 112, 239, 0.1), transparent 55%),
+    #e9eef1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Stage (the workbench around the phone) ---------- */
+
+.stage {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 16px 48px;
+  gap: 20px;
+}
+
+.stage-head {
+  text-align: center;
+  max-width: 520px;
+}
+.stage-head h1 {
+  font-weight: 600;
+  font-size: 20px;
+  letter-spacing: -0.01em;
+}
+.stage-head p {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #4a5560;
+  line-height: 1.5;
+}
+
+/* Prototype switcher (meta control, not part of the app) */
+.switcher {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 999px;
+  padding: 5px;
+  gap: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+.switcher button {
+  font-family: var(--font);
+  font-size: 13.5px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: #5a646e;
+  padding: 8px 18px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.switcher button.active {
+  background: #fff;
+  color: var(--c-text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* ---------- Phone frame ---------- */
+
+.phone {
+  width: 390px;
+  height: 800px;
+  max-height: calc(100vh - 180px);
+  border-radius: 52px;
+  background: #000;
+  padding: 11px;
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 30px 70px rgba(20, 30, 50, 0.32);
+  position: relative;
+  flex-shrink: 0;
+}
+.phone-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 42px;
+  overflow: hidden;
+  background: var(--c-bg);
+}
+.notch {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 122px;
+  height: 33px;
+  background: #000;
+  border-radius: 20px;
+  z-index: 60;
+}
+
+/* The scrollable app surface inside the screen */
+.surface {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--c-bg);
+  -webkit-overflow-scrolling: touch;
+}
+.surface::-webkit-scrollbar {
+  width: 0;
+}
+
+/* ---------- Typography primitives (TextSizes.swift) ---------- */
+.h2 {
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.h3 {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.body {
+  font-size: 19px;
+  font-weight: 400;
+}
+.small {
+  font-size: 15.5px;
+  font-weight: 400;
+}
+.tiny {
+  font-size: 14px;
+  font-weight: 400;
+}
+.mini {
+  font-size: 10px;
+  font-weight: 400;
+}
+.dim {
+  opacity: 0.5;
+}
+.dim75 {
+  opacity: 0.75;
+}
+
+/* ---------- Cards & buttons ---------- */
+.card {
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: 0 7px 18px var(--c-shadow);
+}
+.card-plain {
+  background: var(--c-button);
+  color: var(--c-text);
+}
+.on-gradient {
+  color: #fff;
+}
+
+button.tap {
+  font-family: var(--font);
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+  display: block;
+  transition: transform 0.12s ease;
+}
+button.tap:active {
+  transform: scale(0.96);
+}
+
+/* hero / list row */
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--card-spacing);
+}
+.row .grow {
+  flex: 1;
+  min-width: 0;
+}
+.chev {
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+/* icon circle (white disc with tinted glyph on a gradient card) */
+.icon-circle {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+}
+.icon-circle .halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+}
+.icon-circle .disc {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    0 0 5px rgba(255, 255, 255, 0.5),
+    0 0 11px rgba(255, 255, 255, 0.25);
+}
+
+/* gradient action button (Buttons.swift GradientActionButton) */
+.gbtn {
+  display: flex;
+  align-items: center;
+  gap: var(--card-spacing);
+  padding: 16px;
+  border-radius: var(--radius);
+  color: #fff;
+  box-shadow: 0 7px 18px var(--c-shadow);
+}
+.gbtn .sq {
+  width: 36px;
+  height: 36px;
+  border-radius: 10.5px;
+  background: rgba(255, 255, 255, 0.25);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+/* secondary outline button */
+.obtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--c-button);
+  border: 1.5px solid var(--c-gray);
+}
+
+/* section label */
+.section-label {
+  font-size: 15.5px;
+  opacity: 0.5;
+  margin-bottom: var(--card-spacing);
+}
+
+/* divider with centered text */
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--card-spacing);
+  color: var(--c-text-50);
+}
+.divider .line {
+  flex: 1;
+  height: 1px;
+  background: var(--c-text-25);
+}
+
+/* sheet (bottom modal) */
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.32);
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  animation: fade 0.25s ease;
+}
+.sheet {
+  position: relative;
+  width: 100%;
+  height: 93%;
+  background: var(--c-bg);
+  border-radius: 28px 28px 0 0;
+  overflow: hidden;
+  animation: rise 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+}
+.sheet.tall {
+  height: 96%;
+}
+.sheet-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 6px;
+  flex-shrink: 0;
+}
+.grabber {
+  width: 38px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--c-text-25);
+  flex-shrink: 0;
+}
+.chrome-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-button);
+  color: var(--c-text-50);
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.sheet-body::-webkit-scrollbar {
+  width: 0;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rise {
+  from {
+    transform: translateY(100%);
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+}
+@keyframes badgePop {
+  from {
+    transform: scale(0);
+    opacity: 0;
+  }
+}
+.badge-pop {
+  animation: badgePop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+.fade-in {
+  animation: contentFade 0.32s ease both;
+}
+@keyframes contentFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* close X */
+.xbtn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-button);
+  color: var(--c-text-50);
+  flex-shrink: 0;
+}
+
+/* segmented control (used in redesign — NOT a gradient hero card) */
+.segmented {
+  display: flex;
+  background: var(--c-button);
+  border-radius: 14px;
+  padding: 4px;
+  gap: 4px;
+}
+.segmented button {
+  flex: 1;
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--c-text-50);
+  padding: 9px 4px;
+  border-radius: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+.segmented button.on {
+  background: #fff;
+  color: var(--c-text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+/* chips (cadence selection — a third visual language, distinct from cards) */
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.chip {
+  font-family: var(--font);
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1.5px solid var(--c-gray);
+  background: var(--c-bg);
+  color: var(--c-text);
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.18s ease;
+}
+.chip.on {
+  border-color: transparent;
+  background: var(--g-meditation);
+  color: #fff;
+}
+
+/* meditation list row (audio card — distinct from hero cards) */
+.med-row {
+  display: flex;
+  align-items: center;
+  gap: var(--card-spacing);
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--c-bg);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.05);
+}
+.med-art {
+  width: 56px;
+  height: 56px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex-shrink: 0;
+}
+.play-pill {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--c-button);
+  color: var(--c-med1);
+  flex-shrink: 0;
+}
+
+/* game tile (playful — distinct again) */
+.game-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--card-spacing);
+}
+.game-tile {
+  border-radius: var(--radius);
+  padding: 16px;
+  min-height: 132px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: #fff;
+  box-shadow: 0 7px 18px var(--c-shadow);
+  position: relative;
+  overflow: hidden;
+}
+.game-tile .tile-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.22);
+  display: grid;
+  place-items: center;
+}
+
+/* level dots */
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.level-cell {
+  aspect-ratio: 1.1;
+  border-radius: 12px;
+  background: var(--c-button);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 500;
+  border: 1px solid var(--c-gray);
+  cursor: pointer;
+}
+.level-cell.locked {
+  opacity: 0.45;
+  cursor: default;
+}
+.level-cell.current {
+  color: #fff;
+  border: none;
+}
+
+/* breathing visual */
+.breathe-wrap {
+  position: relative;
+  height: 100%;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--c-bg);
+  overflow: hidden;
+}
+.breathe-orb {
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  background: var(--g-meditation);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 500;
+  box-shadow: 0 0 60px rgba(91, 156, 240, 0.45);
+  transition: transform var(--phase-dur, 4s) ease-in-out;
+  transform: scale(var(--orb-scale, 0.55));
+}
+.breathe-ring {
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  transition: transform var(--phase-dur, 4s) ease-in-out;
+  transform: scale(var(--orb-scale, 0.55));
+  pointer-events: none;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: var(--c-button);
+  font-size: 14px;
+}
+
+/* full-bleed overlay celebration */
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.25);
+  display: grid;
+  place-items: center;
+  z-index: 30;
+  padding: 0 25px;
+}
+.medallion {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  animation: pop 0.4s cubic-bezier(0.2, 1.2, 0.3, 1) both;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+.note {
+  font-size: 12px;
+  color: #6b7680;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px dashed rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  padding: 10px 14px;
+  max-width: 390px;
+  line-height: 1.5;
+  text-align: center;
+}
+.note b {
+  color: #3a444e;
+}

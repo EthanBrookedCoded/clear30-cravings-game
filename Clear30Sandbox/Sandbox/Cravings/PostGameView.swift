@@ -2,16 +2,15 @@
 //  PostGameView.swift
 //  Clear30Sandbox
 //
-//  Single screen the user lands on after a game ends. Combines:
-//   • encouragement headline + support line (intensity-tinted)
-//   • all-time best row + "new best" banner overlay
-//   • once-per-game-ever feedback monster rating card
-//   • "Still craving?" Yes / A little / No row (Fred's "let them keep
-//     going until it passes")
-//   • per-game level grid with padlocks (post-game level picker)
-//   • secondary actions: try another game · breathe · Claire · done
+//  Shown after a game ends. Redesign:
+//   • Centered "Level N complete" hero (the one clear thing)
+//   • A compact horizontal level carousel right under it — the cleared level is the
+//     highlighted hero; earlier cleared levels carry a check; locked levels show a padlock
+//   • Completion choreography: a checkmark pops onto the cleared level, then the next
+//     level fades up from locked and becomes the selection
+//   • Actions pinned to the bottom: primary "Next level" (forward by default) + "I'm all good"
 //
-//  Marks the just-cleared level as complete in CravingStore on appear.
+//  Marks the cleared level complete in CravingStore on appear.
 //
 
 import SwiftUI
@@ -19,259 +18,17 @@ import SwiftUI
 struct PostGameView: View {
 
     let result: GameResult
-    var onRestartSameLevel: () -> Void
-    var onPickLevel: (GameMode) -> Void
-    var onTryAnother: () -> Void
-    var onClaire: () -> Void
-    var onBreathe: () -> Void
-    var onDone:    () -> Void
-    var onRate: (Int) -> Void
+    var onPlayLevel: (Int) -> Void
+    var onDone: () -> Void
 
-    @State private var rating: Int? = nil
+    @State private var unlocked: Int = 1
+    @State private var selected: Int = 1
+    @State private var showCheck: Bool = false
+    @State private var revealed: Bool = false
     @State private var confetti: Int = 0
-    @State private var bestConfetti: Int = 0
 
-    @State private var showRating: Bool = false
-    @State private var isNewBest: Bool = false
-    @State private var bestScore: Int = 0
-    @State private var showBestBanner: Bool = false
-
-    @State private var maxUnlocked: Int = 1
-    @State private var justUnlocked: Int? = nil   // for unlock animation on the next-level tile
-    @State private var pulseGrid: Bool = false    // "A little" still-craving feedback
-
-    private var headline: String {
-        switch result.intensity {
-        case .little:   return "Caught it early 🌳"
-        case .moderate: return "Worked through it 💪"
-        case .extreme:  return "You made it through 🔥"
-        }
-    }
-
-    private var supportLine: String {
-        switch result.intensity {
-        case .little:   return "That's how it gets easier — every rep counts."
-        case .moderate: return "The craving lost some bandwidth. That's the win."
-        case .extreme:  return "You own what happens next. Cravings don't get a vote."
-        }
-    }
-
-    // Intensity-tinted achievement badge — anchors the header and ties the
-    // screen to the craving's intensity (matches the breathing reward medallion).
-    private var headerBadge: some View {
-        Image(systemName: "checkmark")
-            .font(.system(size: 26, weight: .bold))
-            .foregroundColor(.white)
-            .frame(width: 60, height: 60)
-            .background(Circle().fill(result.intensity.gradient))
-            .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 2))
-            .shadow(color: .clear30Shadow, radius: 8, y: 4)
-    }
-
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing) {
-                    headerBadge
-                    VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing / 2) {
-                        Heading2(text: headline)
-                        SmallText(text: supportLine).opacity(0.5)
-                    }
-                }
-                .padding(.bottom, GlobalData.shared.cardSpacing * 1.5)
-
-                bestScoreRow
-                    .padding(.bottom, GlobalData.shared.cardSpacing * 1.5)
-
-                if showRating {
-                    ratingCard
-                        .padding(.bottom, GlobalData.shared.cardSpacing * 1.5)
-                        .transition(.scale.combined(with: .opacity))
-                }
-
-                stillCravingRow
-                    .padding(.bottom, GlobalData.shared.cardSpacing * 1.5)
-
-                levelsPanel
-                    .padding(.bottom, GlobalData.shared.cardSpacing * 2)
-
-                actionButtons
-            }
-            .padding(.horizontal, GlobalData.shared.horizontalPadding)
-            .padding(.top, GlobalData.shared.headingTopPadding * 2)
-            .padding(.bottom, GlobalData.shared.cardSpacing * 3)
-        }
-        .overlay(alignment: .top) { newBestBanner }
-        .modifier(ConfettiPop(confetti: $confetti))
-        .modifier(ConfettiCheckIn(num: 70, radius: 300, confetti: $bestConfetti))
-        .onAppear(perform: setup)
-    }
-
-    // MARK: - Setup (run once on appear)
-
-    private func setup() {
-        // Mark the just-cleared level complete BEFORE reading best/unlock,
-        // so the grid + display reflect the newly-unlocked level immediately.
-        let previousUnlocked = CravingStore.maxUnlockedLevel(for: result.game)
-        if result.completed && !result.wasInfinite {
-            let newMax = CravingStore.markLevelComplete(result.levelReached, for: result.game)
-            if newMax > previousUnlocked { justUnlocked = newMax }
-        }
-        maxUnlocked = CravingStore.maxUnlockedLevel(for: result.game)
-
-        // Best score: read previous, write new, reflect immediately if higher.
-        let previousBest = CravingStore.bestScore(for: result.game)
-        let recordedNewBest = CravingStore.recordScore(result.score, for: result.game)
-        bestScore = max(previousBest, result.score)
-        isNewBest = recordedNewBest   // only true when there was a prior best to beat
-
-        showRating = !CravingStore.hasShownRating(for: result.game)
-        if showRating { CravingStore.markRatingShown(for: result.game) }
-
-        if result.completed {
-            confetti += 1
-            GlobalData.shared.successHeavy()
-        }
-
-        if isNewBest {
-            withAnimation(GlobalData.shared.springAnimation) { showBestBanner = true }
-            bestConfetti += 1
-            GlobalData.shared.successHeavy()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                withAnimation(GlobalData.shared.springAnimation) { showBestBanner = false }
-            }
-        }
-    }
-
-    // MARK: - All-time best row
-
-    private var bestScoreRow: some View {
-        HStack(spacing: GlobalData.shared.cardSpacing) {
-            Image(systemName: "trophy.fill")
-                .resizable().aspectRatio(contentMode: .fit).frame(width: 16)
-                .foregroundStyle(GlobalData.shared.clear30Gradient)
-            HStack(spacing: GlobalData.shared.cardSpacing / 4) {
-                TinyText(text: "This session").opacity(0.5)
-                SmallText(text: "\(result.score)")
-            }
-            Spacer()
-            HStack(spacing: GlobalData.shared.cardSpacing / 4) {
-                TinyText(text: "Best").opacity(0.5)
-                SmallText(text: "\(bestScore)")
-                    .foregroundStyle(GlobalData.shared.clear30Gradient)
-            }
-        }
-        .padding(.vertical, GlobalData.shared.cardSpacing / 1.5)
-        .padding(.horizontal, GlobalData.shared.cardSpacing)
-        .background(
-            RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5)
-                .fill(Color.clear30Button)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5)
-                .strokeBorder(GlobalData.shared.clear30Gradient, lineWidth: 1)
-                .opacity(0.25)
-        )
-    }
-
-    // MARK: - New best banner
-
-    @ViewBuilder
-    private var newBestBanner: some View {
-        if showBestBanner {
-            HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-                Image(systemName: "trophy.fill").foregroundColor(.white)
-                SmallText(text: "New all-time best! 🏆").foregroundColor(.white)
-            }
-            .padding(.vertical, GlobalData.shared.cardSpacing / 2)
-            .padding(.horizontal, GlobalData.shared.cardSpacing * 1.5)
-            .background(Capsule().fill(GlobalData.shared.clear30Gradient))
-            .shadow(color: Color.clear30Green.opacity(0.5), radius: 24)
-            .padding(.top, GlobalData.shared.cardSpacing)
-            .transition(.move(edge: .top).combined(with: .opacity))
-        }
-    }
-
-    // MARK: - Still craving? row
-
-    private var stillCravingRow: some View {
-        VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing / 2) {
-            TinyText(text: "Still craving?").opacity(0.5)
-            HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-                stillCravingButton(text: "Yes", icon: "arrow.clockwise", filled: true) {
-                    GlobalData.shared.mediumImpact()
-                    onRestartSameLevel()
-                }
-                stillCravingButton(text: "A little", icon: "circle.lefthalf.filled", filled: false) {
-                    GlobalData.shared.lightImpact()
-                    pulseLevelsPanel()
-                }
-                stillCravingButton(text: "No", icon: "checkmark", filled: false) {
-                    GlobalData.shared.mediumImpact()
-                    onDone()
-                }
-            }
-        }
-    }
-
-    private func stillCravingButton(text: String, icon: String, filled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: GlobalData.shared.cardSpacing / 4) {
-                Image(systemName: icon)
-                SmallText(text: text)
-            }
-            .foregroundColor(filled ? .white : .clear30Text)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, GlobalData.shared.cardSpacing)
-            .background(
-                RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5)
-                    .fill(filled ? AnyShapeStyle(result.intensity.gradient) : AnyShapeStyle(Color.clear30Button))
-            )
-            .overlay {
-                if !filled {
-                    RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5)
-                        .strokeBorder(result.intensity.gradient, lineWidth: 1)
-                        .opacity(0.25)
-                }
-            }
-        }
-        .modifier(DefaultButtonStyle(shadow: false))
-    }
-
-    private func pulseLevelsPanel() {
-        withAnimation(.easeOut(duration: 0.2)) { pulseGrid = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            withAnimation(.easeIn(duration: 0.3)) { pulseGrid = false }
-        }
-    }
-
-    // MARK: - Levels panel
-
-    private var levelsPanel: some View {
-        VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing / 2) {
-            HStack {
-                TinyText(text: "\(gameTitle) levels").opacity(0.5)
-                Spacer()
-                if maxUnlocked < CravingStore.maxLevel {
-                    TinyText(text: "Unlocked: \(maxUnlocked) / \(CravingStore.maxLevel)").opacity(0.5)
-                } else {
-                    TinyText(text: "Mastered ✨").foregroundStyle(GlobalData.shared.clear30Gradient)
-                }
-            }
-
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: GlobalData.shared.cardSpacing / 2), count: 4),
-                      spacing: GlobalData.shared.cardSpacing / 2) {
-                ForEach(1...CravingStore.maxLevel, id: \.self) { level in
-                    levelCell(level)
-                }
-                if CravingStore.isInfiniteUnlocked(for: result.game) {
-                    infiniteCell
-                }
-            }
-            .scaleEffect(pulseGrid ? 1.04 : 1.0)
-            .animation(GlobalData.shared.springAnimation, value: pulseGrid)
-        }
-    }
+    private var level: Int { result.levelReached }
+    private var nextLevel: Int? { level < CravingStore.maxLevel ? level + 1 : nil }
 
     private var gameTitle: String {
         switch result.game {
@@ -282,196 +39,199 @@ struct PostGameView: View {
         }
     }
 
-    private func levelCell(_ level: Int) -> some View {
-        let unlocked = level <= maxUnlocked
-        let isCurrent = level == result.levelReached
-        let isJustUnlocked = justUnlocked == level
-        return Button {
-            guard unlocked else { return }
-            GlobalData.shared.lightImpact()
-            onPickLevel(.level(level))
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 2)
-                    .fill(isCurrent
-                          ? AnyShapeStyle(result.intensity.gradient)
-                          : AnyShapeStyle(Color.clear30Button))
-                if unlocked {
-                    Text("\(level)")
-                        .font(.custom("Lexend", size: 17).weight(.medium))
-                        .foregroundColor(isCurrent ? .white : .clear30Text)
-                } else {
-                    Image(systemName: "lock.fill")
-                        .foregroundColor(.clear30Text.opacity(0.25))
-                }
-            }
-            .frame(height: GlobalData.shared.cardSpacing * 3.5)
-            .overlay {
-                if isJustUnlocked {
-                    RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 2)
-                        .strokeBorder(GlobalData.shared.clear30Gradient, lineWidth: 2)
-                } else if unlocked && !isCurrent {
-                    RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 2)
-                        .strokeBorder(GlobalData.shared.clear30Gradient, lineWidth: 1)
-                        .opacity(0.25)
-                }
-            }
-            .opacity(unlocked ? 1 : 0.5)
-            .scaleEffect(isJustUnlocked ? 1.05 : 1.0)
-            .animation(GlobalData.shared.springAnimation, value: isJustUnlocked)
+    private var tint: Color {
+        switch result.intensity {
+        case .little:   return .clear30Blue
+        case .moderate: return Color(hex: "#6B6CF4")
+        case .extreme:  return Color(hex: "#F65555")
         }
-        .modifier(DefaultButtonStyle(shadow: false, transition: false))
-        .disabled(!unlocked)
     }
 
-    private var infiniteCell: some View {
-        Button {
-            GlobalData.shared.mediumImpact()
-            onPickLevel(.infinite)
-        } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 2)
-                    .fill(GlobalData.shared.clear30Gradient)
-                Image(systemName: "infinity").foregroundColor(.white)
-            }
-            .frame(height: GlobalData.shared.cardSpacing * 3.5)
-        }
-        .modifier(DefaultButtonStyle(shadow: false, transition: false))
+    private var primaryLabel: String {
+        if let next = nextLevel, selected == next { return "Next level" }
+        if selected == level { return "Play again" }
+        return "Play level \(selected)"
     }
 
-    // MARK: - Action buttons (bottom)
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: GlobalData.shared.cardSpacing)
 
-    private var actionButtons: some View {
+            hero
+
+            levelCarousel
+                .padding(.top, GlobalData.shared.cardSpacing * 1.5)
+
+            Spacer(minLength: GlobalData.shared.cardSpacing)
+
+            actions
+                .padding(.horizontal, GlobalData.shared.horizontalPadding)
+                .padding(.bottom, GlobalData.shared.cardSpacing * 2.5)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, GlobalData.shared.headingTopPadding * 2)
+        .modifier(ConfettiCheckIn(num: 60, radius: 280, confetti: $confetti))
+        .onAppear(perform: setup)
+    }
+
+    // MARK: - Setup + choreography
+
+    private func setup() {
+        let previous = CravingStore.maxUnlockedLevel(for: result.game)
+        if result.completed && !result.wasInfinite {
+            CravingStore.markLevelComplete(level, for: result.game)
+        }
+        _ = CravingStore.recordScore(result.score, for: result.game)
+        unlocked = max(previous, CravingStore.maxUnlockedLevel(for: result.game))
+        selected = level
+
+        if result.completed {
+            confetti += 1
+            GlobalData.shared.successHeavy()
+        }
+
+        // 1) checkmark pops onto the cleared level
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            withAnimation(GlobalData.shared.springAnimation) { showCheck = true }
+        }
+        // 2) the next level fades up and becomes the selection
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.95) {
+            withAnimation(GlobalData.shared.springAnimation) {
+                revealed = true
+                selected = nextLevel ?? level
+            }
+        }
+    }
+
+    // MARK: - Hero
+
+    private var hero: some View {
         VStack(spacing: GlobalData.shared.cardSpacing) {
-            GradientActionButton(
-                text: "Try a different game",
-                sfSymbol: "square.grid.2x2.fill",
-                gradient: GlobalData.shared.claireGradient
-            ) {
-                GlobalData.shared.lightImpact()
-                onTryAnother()
-            }
+            Image(systemName: "checkmark")
+                .font(.system(size: 28, weight: .bold))
+                .foregroundColor(.white)
+                .frame(width: 64, height: 64)
+                .background(Circle().fill(result.intensity.gradient))
+                .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 2))
+                .shadow(color: .clear30Shadow, radius: 8, y: 4)
 
-            HStack(spacing: GlobalData.shared.cardSpacing) {
-                secondary(text: "Breathe", icon: "wind", iconGradient: GlobalData.shared.meditationGradient) {
-                    GlobalData.shared.lightImpact()
-                    onBreathe()
+            VStack(spacing: GlobalData.shared.cardSpacing / 2) {
+                Heading2(text: "Level \(level) complete 🎉")
+                SmallText(text: "\(gameTitle) · scored \(result.score)").opacity(0.5)
+            }
+            .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, GlobalData.shared.horizontalPadding)
+    }
+
+    // MARK: - Level carousel
+
+    private var levelCarousel: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: GlobalData.shared.cardSpacing / 1.4) {
+                    ForEach(1...CravingStore.maxLevel, id: \.self) { lvl in
+                        levelCell(lvl).id(lvl)
+                    }
                 }
-                secondary(text: "Claire", icon: "sparkles", iconGradient: GlobalData.shared.claireGradient) {
-                    GlobalData.shared.mediumImpact()
-                    onClaire()
+                .padding(.horizontal, GlobalData.shared.horizontalPadding)
+                .padding(.vertical, GlobalData.shared.cardSpacing)
+            }
+            .onAppear {
+                DispatchQueue.main.async {
+                    withAnimation(.none) { proxy.scrollTo(level, anchor: .center) }
                 }
             }
+        }
+    }
 
-            secondary(text: "I'm done", icon: "checkmark", iconGradient: GlobalData.shared.clear30Gradient) {
+    private func levelCell(_ lvl: Int) -> some View {
+        let isSelected = lvl == selected
+        let isCleared  = lvl <= level
+        let isNext     = lvl == nextLevel
+        let locked     = lvl > unlocked
+        let dimNext    = isNext && !revealed
+        let showBadge  = (lvl == level) ? showCheck : (isCleared && !isSelected)
+        let cellOpacity: Double = dimNext ? 0.35 : (locked ? 0.5 : 1)
+
+        return Button {
+            guard !locked && !dimNext else { return }
+            GlobalData.shared.lightImpact()
+            withAnimation(GlobalData.shared.springAnimation) { selected = lvl }
+        } label: {
+            ZStack {
+                RoundedRectangle(cornerRadius: 15)
+                    .fill(isSelected ? AnyShapeStyle(result.intensity.gradient) : AnyShapeStyle(Color.clear30Button))
+                    .overlay {
+                        if !isSelected {
+                            RoundedRectangle(cornerRadius: 15)
+                                .strokeBorder(isCleared ? tint.opacity(0.4) : Color.clear30OpacityGray, lineWidth: 1)
+                        }
+                    }
+
+                if locked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(.clear30Text.opacity(0.3))
+                } else {
+                    Text("\(lvl)")
+                        .font(.custom("Lexend", size: 17).weight(.semibold))
+                        .foregroundColor(isSelected ? .white : .clear30Text)
+                }
+            }
+            .frame(width: 52, height: 52)
+            .scaleEffect(isSelected ? 1.12 : 1)
+            .shadow(color: isSelected ? .clear30Shadow : .clear, radius: 8, y: 4)
+            .opacity(cellOpacity)
+            .overlay(alignment: .topTrailing) {
+                if showBadge {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundColor(.white)
+                        .frame(width: 17, height: 17)
+                        .background(Circle().fill(tint))
+                        .offset(x: 5, y: -5)
+                        .transition(.scale.combined(with: .opacity))
+                }
+            }
+        }
+        .modifier(DefaultButtonStyle(shadow: false, transition: false))
+        .disabled(locked || dimNext)
+    }
+
+    // MARK: - Actions
+
+    private var actions: some View {
+        VStack(spacing: GlobalData.shared.cardSpacing) {
+            Button {
+                GlobalData.shared.mediumImpact()
+                onPlayLevel(selected)
+            } label: {
+                SmallText(text: primaryLabel)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .modifier(CardStyle(gradient: result.intensity.gradient))
+            }
+            .modifier(DefaultButtonStyle(shadow: false))
+
+            Button {
                 GlobalData.shared.mediumImpact()
                 onDone()
-            }
-        }
-    }
-
-    private func secondary(text: String, icon: String, iconGradient: LinearGradient, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-                Image(systemName: icon)
-                    .foregroundStyle(iconGradient)
-                SmallText(text: text)
-            }
-            .frame(maxWidth: .infinity)
-            .modifier(CardStyle(
-                color: .clear30Button,
-                outlineGradient: iconGradient,
-                outlineWidth: 1.5,
-                outlineOpacity: 0.25
-            ))
-        }
-        .modifier(DefaultButtonStyle(shadow: false))
-    }
-
-    // MARK: - Rating card
-
-    private var ratingCard: some View {
-        HStack(alignment: .center, spacing: GlobalData.shared.cardSpacing) {
-            Image(rating == nil ? "FeedbackMonsterHungry" : "FeedbackMonsterFull")
-                .resizable().aspectRatio(contentMode: .fit).frame(width: 72)
-                .transition(.opacity)
-                .animation(GlobalData.shared.springAnimation, value: rating)
-
-            VStack(alignment: .leading, spacing: GlobalData.shared.cardSpacing / 2) {
-                speechBubble(text: rating == nil ? "I LOVE feedback!" : "Yum! Thanks 💛")
-                starRow
-            }
-
-            Spacer(minLength: 0)
-        }
-        .modifier(CardStyle(
-            color: .clear30Button,
-            shadowColor: .clear30Shadow,
-            outlineGradient: GlobalData.shared.clear30Gradient,
-            outlineWidth: 1.5,
-            outlineOpacity: 0.5
-        ))
-    }
-
-    private var starRow: some View {
-        HStack(spacing: GlobalData.shared.cardSpacing / 2) {
-            ForEach(1...5, id: \.self) { value in
-                let filled = (rating ?? 0) >= value
-                Button {
-                    GlobalData.shared.lightImpact()
-                    withAnimation(GlobalData.shared.springAnimation) { rating = value }
-                    onRate(value)
-                } label: {
-                    Image(systemName: filled ? "star.fill" : "star")
-                        .resizable().aspectRatio(contentMode: .fit).frame(width: 26)
-                        .foregroundStyle(filled
-                                         ? AnyShapeStyle(GlobalData.shared.clear30Gradient)
-                                         : AnyShapeStyle(Color.clear30Text.opacity(0.25)))
-                        .scaleEffect(filled ? 1.0 : 0.9)
+            } label: {
+                HStack(spacing: GlobalData.shared.cardSpacing / 2) {
+                    Image(systemName: "checkmark").foregroundStyle(GlobalData.shared.clear30Gradient)
+                    SmallText(text: "I'm all good")
                 }
-                .modifier(DefaultButtonStyle(shadow: false))
+                .frame(maxWidth: .infinity)
+                .modifier(CardStyle(
+                    color: .clear30Button,
+                    outlineGradient: GlobalData.shared.clear30Gradient,
+                    outlineWidth: 1.5,
+                    outlineOpacity: 0.25
+                ))
             }
+            .modifier(DefaultButtonStyle(shadow: false))
         }
-    }
-
-    private func speechBubble(text: String) -> some View {
-        SmallText(text: text)
-            .foregroundColor(.clear30Text)
-            .padding(.vertical, GlobalData.shared.cardSpacing / 2)
-            .padding(.horizontal, GlobalData.shared.cardSpacing)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5)
-                        .fill(Color.clear30Button)
-                    RoundedRectangle(cornerRadius: GlobalData.shared.cornerRadius / 1.5)
-                        .strokeBorder(Color.clear30OpacityGray, lineWidth: 1)
-                }
-            )
-            .overlay(alignment: .bottomLeading) {
-                Triangle()
-                    .fill(Color.clear30Button)
-                    .frame(width: 14, height: 10)
-                    .offset(x: -6, y: 6)
-                    .overlay(
-                        Triangle()
-                            .stroke(Color.clear30OpacityGray, lineWidth: 1)
-                            .frame(width: 14, height: 10)
-                            .offset(x: -6, y: 6)
-                    )
-            }
-            .shadow(color: .clear30Shadow, radius: 8, y: 2)
-    }
-}
-
-// MARK: - Speech bubble tail
-
-private struct Triangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: rect.maxX, y: rect.minY))
-        p.addLine(to: CGPoint(x: rect.minX + 4, y: rect.maxY))
-        p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-        p.closeSubpath()
-        return p
     }
 }
